@@ -196,28 +196,28 @@ type connection = {
 
 
 let find_path ?(max_depth = 3) ~origin ~destination ~how_to_fetch () =
-  ignore (max_depth : int);
-  ignore (origin : string);
-  ignore (destination : string);
-  ignore (how_to_fetch : File_fetcher.How_to_fetch.t);
   let visited = String.Hash_set.create () in
-  let rec rec_search positions_to_check = 
+  let rec rec_search positions_to_check depth= 
     match positions_to_check with 
     | (article, connection) :: rest ->
       let article_name = create_article_name article in
       if not (Hash_set.mem visited article_name) then (
         Hash_set.add visited article_name;
-      let contents = File_fetcher.fetch_exn how_to_fetch ~resource:article in
+      let contents = File_fetcher.fetch_exn how_to_fetch ~resource:article in (* I am file fetching on the wrong thing*)
       if String.equal article_name destination then Some [connection]
       else (
         let next_sites = get_linked_articles contents|> List.map ~f:(fun article2 -> (article2, {article1 = article_name; article2})) in
-        match rec_search (rest @ next_sites) with
-        |Some path -> Some ([connection] @ path)
-        |None -> None))
-    else rec_search rest
+        match rec_search rest depth with 
+        | Some path -> Some ([connection] @ path)
+        | None ->(
+            match rec_search next_sites (depth -1) with
+            |Some path -> Some ([connection] @ path)
+            |None -> None)) 
+            )
+    else rec_search rest depth
     | _ -> None
   in
-  rec_search [(origin, {article1 = "Empty"; article2 = "Empty"})]
+  rec_search [(origin, {article1 = "Empty"; article2 = "Empty"})] max_depth
 ;;
 
 let find_path_command =
