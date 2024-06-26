@@ -16,12 +16,11 @@ open! Core
    from a Wikipedia page will have the form "/wiki/<TITLE>". *)
 
    let get_linked_articles contents : string list =
-  let is_not_namespace link = 
-    match Wikipedia_namespace.namespace link with
-  |None -> true
-  |Some _namespace -> false
-  in
-
+      let is_not_namespace link = 
+        match Wikipedia_namespace.namespace link with
+      |None -> true
+      |Some _namespace -> false
+      in
   let open Soup in
   parse contents
   $$ "a[href*=/wiki/]"
@@ -62,12 +61,62 @@ let print_links_command =
    [how_to_fetch] argument along with [File_fetcher] to fetch the articles so that the
    implementation can be tested locally on the small dataset in the ../resources/wiki
    directory. *)
+   module Article = String
+
+
+
+module G = Graph.Imperative.Graph.Concrete (Article)
+
+   (* We extend our [Graph] structure with the [Dot] API so that we can easily
+      render constructed graphs. Documentation about this API can be found here:
+      https://github.com/backtracking/ocamlgraph/blob/master/src/dot.mli *)
+   module Dot = Graph.Graphviz.Dot (struct
+       include G
+   
+       (* These functions can be changed to tweak the appearance of the
+          generated graph. Check out the ocamlgraph graphviz API
+          (https://github.com/backtracking/ocamlgraph/blob/master/src/graphviz.mli)
+          for examples of what values can be set here. *)
+       let edge_attributes _ = [ `Dir `None ]
+       let default_edge_attributes _ = []
+       let get_subgraph _ = None
+       let vertex_attributes v = [ `Shape `Box; `Label v; `Fillcolor 1000 ]
+       let vertex_name v = sprintf {|"%s"|} v
+       let default_vertex_attributes _ = []
+       let graph_attributes _ = []
+     end)
+
+let create_article_name str= 
+     let str_title = List.hd (List. rev(String.split_on_chars str ~on: ['/'] )) in
+     match str_title with
+     | Some title -> title
+     | None -> "EMPTY"
+     
 let visualize ?(max_depth = 3) ~origin ~output_file ~how_to_fetch () : unit =
-  ignore (max_depth : int);
-  ignore (origin : string);
-  ignore (output_file : File_path.t);
-  ignore (how_to_fetch : File_fetcher.How_to_fetch.t);
-  failwith "TODO"
+  let graph = G.create () in
+  let visited = String.Hash_set.create () in
+  let rec find_articles ~depth articles_to_check =
+    match articles_to_check with
+  | first :: rest ->
+    let article = create_article_name first in
+    if not (Hash_set.mem visited article) 
+      then
+        let contents = File_fetcher.fetch_exn how_to_fetch ~resource:first in
+        Hash_set.add visited article;
+        let next_level = get_linked_articles contents in
+        List.iter next_level ~f:(fun child_link -> 
+          G.add_edge graph article (create_article_name child_link));
+        find_articles ~depth rest;
+        (match depth with
+        | 0 -> ()
+        | _ -> find_articles ~depth:(depth -1) next_level
+        )
+        else find_articles ~depth rest;
+  | _ -> ()
+  in
+
+  find_articles ~depth:(max_depth+1) [origin];
+  Dot.output_graph (Out_channel.create (File_path.to_string output_file)) graph;
 ;;
 
 let visualize_command =
@@ -103,12 +152,72 @@ let visualize_command =
    the ../resources/wiki directory.
 
    [max_depth] is useful to limit the time the program spends exploring the graph. *)
+
+module Connection = struct
+    module T = struct
+      type t =
+        { article1 : string
+        ; article2 : string
+        }
+      [@@deriving compare, sexp, hash, equal]
+    end
+  
+    include Comparable.Make (T)
+    include T
+  end
+
+(*
+let find_path game =
+  let visited = Hash_set.create (module Coordinate) in
+  let rec rec_search positions_to_check =
+    match positions_to_check with
+    | (position, direction) :: rest ->
+      if not (Hash_set.mem visited position)
+      then (
+        Hash_set.add visited position;
+        if Coordinate.equal position game.goal
+        then Some [ direction ]
+        else (
+          let next_states = find_neighbors position game in
+          match rec_search next_states with
+          | Some path -> Some ([ direction ] @ path)
+          | None -> rec_search rest))
+      else rec_search rest
+    | _ -> None
+  in
+  rec_search [ game.player, () ]
+;;
+
+*)
+type connection = {
+  article1: string;
+  article2: string
+}
+
+
 let find_path ?(max_depth = 3) ~origin ~destination ~how_to_fetch () =
   ignore (max_depth : int);
   ignore (origin : string);
   ignore (destination : string);
   ignore (how_to_fetch : File_fetcher.How_to_fetch.t);
-  failwith "TODO"
+  let visited = String.Hash_set.create () in
+  let rec rec_search positions_to_check = 
+    match positions_to_check with 
+    | (article, connection) :: rest ->
+      let article_name = create_article_name article in
+      if not (Hash_set.mem visited article_name) then (
+        Hash_set.add visited article_name;
+      let contents = File_fetcher.fetch_exn how_to_fetch ~resource:article in
+      if String.equal article_name destination then Some [connection]
+      else (
+        let next_sites = get_linked_articles contents|> List.map ~f:(fun article2 -> (article2, {article1 = article_name; article2})) in
+        match rec_search (rest @ next_sites) with
+        |Some path -> Some ([connection] @ path)
+        |None -> None))
+    else rec_search rest
+    | _ -> None
+  in
+  rec_search [(origin, {article1 = "Empty"; article2 = "Empty"})]
 ;;
 
 let find_path_command =
@@ -128,7 +237,8 @@ let find_path_command =
       fun () ->
         match find_path ~max_depth ~origin ~destination ~how_to_fetch () with
         | None -> print_endline "No path found!"
-        | Some trace -> List.iter trace ~f:print_endline]
+        | Some trace -> List.iter trace ~f:(fun connection -> 
+          printf !"%{String} <--> %{String}" connection.article1 connection.article2) ]
 ;;
 
 let command =

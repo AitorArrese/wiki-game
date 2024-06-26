@@ -16,6 +16,7 @@ module Network = struct
        [Comparable.Make] functor also gives us immutable maps, which might
        come in handy later. *)
     include Comparable.Make (T)
+    include T
 
     let of_string s =
       match String.split s ~on:',' with
@@ -124,11 +125,41 @@ let visualize_command =
 
 (* [find_friend_group network ~person] returns a list of all people who are
    mutually connected to the provided [person] in the provided [network]. *)
-let find_friend_group network ~person : Person.t list =
-  ignore (network : Network.t);
-  ignore (person : Person.t);
-  failwith "TODO"
+
+let find_next_level network ~person ~visited =
+  let filt =
+    Set.filter network ~f:(fun (a, b) ->
+      Person.equal a person && not (Set.mem visited b))
+  in
+  Set.map (module String) filt ~f:(fun (_a, b) -> b)
 ;;
+
+let rec find_friends network ~people_to_check ~visited =
+  match people_to_check with
+  | person :: rest ->
+    let next_level = find_next_level network ~person ~visited in
+    let visited = Set.union visited next_level in
+    find_friends
+      network
+      ~people_to_check:(rest @ Set.to_list next_level)
+      ~visited
+  | _ -> visited
+;;
+
+let find_friend_group (network : Network.t) ~person : Person.t list =
+  Set.to_list
+    (find_friends
+       network
+       ~people_to_check:[ person ]
+       ~visited:(Set.singleton (module Person) person))
+;;
+
+(* let find_friend_group (network : Network.t) ~person : Person.t list = let
+   rec find_friends network ~person ~visited = List.concat_map network
+   ~f:(fun (a, b) -> if String.equal a person && not (Set.mem visited b) then
+   [ b ] @ find_friends network ~person:b ~visited:(Set.add visited b) else
+   []) in find_friends (Set.to_list network) ~person ~visited:(Set.empty
+   (module String)) ;; *)
 
 let find_friend_group_command =
   let open Command.Let_syntax in
