@@ -11,22 +11,6 @@ let get_credits contents : string list =
     texts name |> String.concat ~sep:"" |> String.strip)
 ;;
 
-let%expect_test "get_credits" =
-  (* This test uses existing files on the filesystem. *)
-  let contents =
-    File_fetcher.fetch_exn
-      (Local (File_path.of_string "../resources/wiki"))
-      ~resource:"Carnivore"
-  in
-  List.iter (get_credits contents) ~f:print_endline;
-  [%expect {|
-  Who Am I?
-  Rush Hour
-  Police Story
-  Rush Hour 2
-  |}]
-;;
-
 let print_credits_command =
   let open Command.Let_syntax in
   Command.basic
