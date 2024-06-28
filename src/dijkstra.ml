@@ -29,8 +29,8 @@ end
 
 module Edge = struct
   (** This type represents an edge between two nodes [a] and [b]. Note that since we are
-      working with undirected graphs, the order of [a] and [b] do not matter. That is, an
-      [Edge.t] { a = 1; b = 2; ... } is equivalent to { a = 2; b = 1; ... } *)
+         working with undirected graphs, the order of [a] and [b] do not matter. That is, an
+         [Edge.t] { a = 1; b = 2; ... } is equivalent to { a = 2; b = 1; ... } *)
 
   module T = struct
     type t =
@@ -141,6 +141,7 @@ module Nodes = struct
     let output = ref None in
     let min_distance = ref 0 in
     let parent = ref None in
+    let origin = ref None in
     Map.iteri t ~f:(fun ~key:a ~data:(d : Node.t) ->
       match d.state with
       | Node.State.Todo { distance; via } ->
@@ -150,10 +151,14 @@ module Nodes = struct
           min_distance := distance;
           parent := Some via;
           output := Some a)
+      | Node.State.Origin -> origin := Some a
       | _ -> ());
     match !output, !parent with
     | Some node, Some via -> Some (node, (!min_distance, via))
-    | _ -> None
+    | _ ->
+      (match !origin with
+       | Some start -> Some (start, (0, start))
+       | None -> None)
   ;;
 
   let%expect_test "next_node" =
@@ -213,33 +218,41 @@ end
    search algorithm! Remember to reenable unused warnings by deleting the
    first line of this file. *)
 
-
-
-let shortest_path ~edges ~origin ~destination : Node_id.t list = 
+let shortest_path ~edges ~origin ~destination : Node_id.t list =
   let nodes = Nodes.of_edges edges in
-  let rec traversal =
+  let rec traversal () =
     match Nodes.next_node nodes with
-    | Some (id, (distance, via)) -> 
-      (
-        let neighbors = Edges.neighbors edges id in
-        List.iter neighbors ~f:(
-          fun (node, distance) -> 
-            let node_st = Nodes.state nodes node in
-            if Node.State.equal node_st Node.State.Unseen || ((Node.State.equal node_st (Node.State.Todo {distance; via})) && (node_st.distance > distance )) then 
-              (
-          Nodes.set_state nodes node (Todo {distance; via= id})
-          )
+    | Some (id, (distance, initial_via)) ->
+      let neighbors = Edges.neighbors edges id in
+      List.iter neighbors ~f:(fun (node, distance_between_nodes) ->
+        let node_st = Nodes.state nodes node in
+        match node_st with
+        | Node.State.Unseen ->
+          Nodes.set_state
+            nodes
+            node
+            (Todo { distance = distance + distance_between_nodes; via = id })
+        | Node.State.Todo { distance = current_distance; via } ->
+          if current_distance > distance + distance_between_nodes
+          then
+            Nodes.set_state
+              nodes
+              node
+              (Todo
+                 { distance = distance + distance_between_nodes; via = id })
+        | _ -> ());
+      if not (Node_id.equal id initial_via)
+      then Nodes.set_state nodes id (Node.State.Done { via = initial_via });
+      if Node_id.equal id destination
+      then Nodes.path nodes id
+      else traversal ()
+    | _ -> []
+  in
+  Nodes.set_state nodes origin Node.State.Origin;
+  traversal ()
+;;
 
-          )
-      )
-    | _ -> ()
-    in
-    ;;
-  
-  
-
-
-let%expect_test ("shortest_path" [@tags "disabled"]) =
+let%expect_test "shortest_path" =
   let n = Node_id.create in
   let n0, n1, n2, n3, n4, n5 = n 0, n 1, n 2, n 3, n 4, n 5 in
   let edges =
@@ -261,3 +274,26 @@ let%expect_test ("shortest_path" [@tags "disabled"]) =
 
 (* Exercise 7: Add some more test cases, exploring any corner cases you can
    think of. *)
+
+let%expect_test "shortest_path_my_graph" =
+  let n = Node_id.create in
+  let n0, n1, n2, n3, n4, n5 = n 0, n 1, n 2, n 3, n 4, n 5 in
+  let edges =
+    Edge.
+      [ { a = n0; b = n4; distance = 4 }
+      ; { a = n0; b = n5; distance = 4 }
+      ; { a = n2; b = n1; distance = 3 }
+      ; { a = n4; b = n1; distance = 14 }
+      ; { a = n4; b = n3; distance = 2 }
+      ; { a = n1; b = n5; distance = 18 }
+      ; { a = n5; b = n2; distance = 7 }
+      ; { a = n3; b = n5; distance = 5 }
+      ; { a = n3; b = n2; distance = 4 }
+      ]
+  in
+  let origin = n0 in
+  let destination = n1 in
+  let path = shortest_path ~edges ~origin ~destination in
+  print_s ([%sexp_of: Node_id.t list] path);
+  [%expect {| (0 4 3 2 1) |}]
+;;
